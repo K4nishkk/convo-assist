@@ -9,6 +9,11 @@ ws.on('open', () => {
 
 ws.on('message', (data) => {
   console.log("Received:", data.toString());
+
+  setTimeout(() => {
+    ws.send("message sent after 5 seconds");
+    console.log("sent message after 5 seconds")
+  }, 5000);
 });
 
 ws.on('close', () => {

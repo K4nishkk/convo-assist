@@ -1,12 +1,21 @@
 import asyncio
 import websockets
 
+resume_event = asyncio.Event()
+resume_event.set()
+
 clients = set()
 
 async def send_transcription(websocket):
     clients.add(websocket)
     try:
-        await websocket.wait_closed()
+        async for message in websocket:
+            print("message received:", message)
+            resume_event.set()
+
+    except websockets.exceptions.ConnectionClosed:
+        pass
+
     finally:
         clients.remove(websocket)
 

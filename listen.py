@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from queue import Queue
 from time import sleep
 from sys import platform
-from whisper_server import start_websocket, broadcast
+from whisper_server import start_websocket, broadcast, resume_event
 
 # Global queue and transcription state
 data_queue = Queue()
@@ -44,10 +44,13 @@ def record_callback(_, audio: sr.AudioData):
 
 async def transcribe_loop(audio_model, recognizer, mic, phrase_timeout, record_timeout):
     global phrase_time, phrase_bytes, transcription
-    recognizer.listen_in_background(mic, record_callback, phrase_time_limit=record_timeout)
+
+    stop_listening = recognizer.listen_in_background(mic, record_callback, phrase_time_limit=record_timeout)
     print("Model loaded. Listening...\n")
 
     while True:
+        await resume_event.wait()  # Only proceed if allowed to listen
+
         now = datetime.utcnow()
         phrase_complete = False
 
@@ -69,7 +72,16 @@ async def transcribe_loop(audio_model, recognizer, mic, phrase_timeout, record_t
 
             if phrase_complete:
                 transcription.append(text + " <--- end")
-                await broadcast(transcription[-2])
+                await broadcast(transcription[-2])  # Send last phrase
+
+                # 👇 Pause transcription and wait for return message
+                stop_listening(wait_for_stop=False)
+                resume_event.clear()
+                print("Paused. Waiting for WebSocket client reply...")
+                await resume_event.wait()
+                print("Resumed listening...\n")
+                stop_listening = recognizer.listen_in_background(mic, record_callback, phrase_time_limit=record_timeout)
+
             else:
                 transcription[-1] = text
 
