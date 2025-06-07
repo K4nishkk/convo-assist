@@ -9,7 +9,7 @@ const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 const model = 'gemini-2.5-flash-preview-native-audio-dialog';
 const config = { responseModalities: [Modality.AUDIO] };
 
-const speaker = new Speaker({
+export const speaker = new Speaker({
   channels: 1,
   bitDepth: 16,
   sampleRate: 24000,
@@ -35,7 +35,7 @@ function createMessageQueue() {
   };
 }
 
-async function live() {
+async function live(input) {
   const responseQueue = createMessageQueue();
 
   const session = await ai.live.connect({
@@ -48,8 +48,6 @@ async function live() {
       onclose: (e) => console.debug('Closed:', e.reason),
     },
   });
-
-  const input = 'create a paragraph of story of dungeons and dragons';
   session.sendClientContent({ turns: input });
 
   while (true) {
@@ -63,8 +61,13 @@ async function live() {
     if (msg?.serverContent?.turnComplete) break;
   }
 
+  if (!speaker._writableState.ended) {
+    speaker.end();
+  }
+
   speaker.end();
   session.close();
 }
 
-live().catch(console.error);
+// live().catch(console.error);
+export default live;

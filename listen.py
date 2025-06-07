@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from queue import Queue
 from time import sleep
 from sys import platform
-from whisper_server import start_websocket, broadcast, resume_event
+from listen_server import start_websocket, broadcast, resume_event
 
 # Global queue and transcription state
 data_queue = Queue()
