@@ -1,36 +1,30 @@
-import argparse
 import os
 import numpy as np
-import speech_recognition as sr
-import whisper
-import torch
 import asyncio
-
-from datetime import datetime, timedelta
 from queue import Queue
-from sys import platform
+from datetime import datetime, timedelta
+import speech_recognition as sr
+from geminiClient import live
+import torch
+import keyHandler
+from dotenv import load_dotenv
+import websockets
 
-from gemini import live
+load_dotenv()
 
 data_queue = Queue()
 transcription = ['']
 phrase_time = None
 phrase_bytes = bytes()
 
-def setup_args():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--model", default="small", choices=["tiny", "base", "small", "medium", "large"])
-    parser.add_argument("--non_english", action='store_true')
-    parser.add_argument("--energy_threshold", default=1000, type=int)
-    parser.add_argument("--record_timeout", default=2, type=float)
-    parser.add_argument("--phrase_timeout", default=3, type=float)
-    if 'linux' in platform:
-        parser.add_argument("--default_microphone", default='pulse', type=str)
-    return parser.parse_args()
+keyHandler.openConn("api_keys.sqlite")
+keyHandler.loadKeysData("api-keys.yaml")
+apiKeyId: str = keyHandler.getKeyId()
+print(f"Using key: {apiKeyId}")
 
-def setup_microphone(args):
+def setup_microphone(energy_threshold):
     recognizer = sr.Recognizer()
-    recognizer.energy_threshold = args.energy_threshold
+    recognizer.energy_threshold = energy_threshold
     recognizer.dynamic_energy_threshold = False
     mic = sr.Microphone(sample_rate=16000)
     with mic:
@@ -41,8 +35,8 @@ def record_callback(_, audio: sr.AudioData):
     data = audio.get_raw_data()
     data_queue.put(data)
 
-async def transcribe_loop(audio_model, recognizer, mic, phrase_timeout, record_timeout):
-    global phrase_time, phrase_bytes, transcription
+async def conversation_loop(audio_model, recognizer, mic, phrase_timeout, record_timeout):
+    global phrase_time, phrase_bytes, transcription, apiKeyId
 
     stop_listening = recognizer.listen_in_background(mic, record_callback, phrase_time_limit=record_timeout)
     print("Model loaded. Listening...\n")
@@ -70,33 +64,28 @@ async def transcribe_loop(audio_model, recognizer, mic, phrase_timeout, record_t
             if phrase_complete:
                 transcription.append(text + " <--- end")
 
-                print("Paused. Waiting for WebSocket client reply...")
+                print("Paused. Waiting for reply...")
                 stop_listening(wait_for_stop=False)
-                await live(transcription[-2])
-                
+
+                while True:
+                    try:
+                        await live(transcription[-2], os.getenv(apiKeyId))
+                    except websockets.exceptions.ConnectionClosedError as e:
+                        print("An error has occured, changing key")
+                        keyHandler.insertKeyLog(apiKeyId, False, e.code)
+                        apiKeyId = keyHandler.getNextKeyId(apiKeyId)
+                        print(f"new keyId: {apiKeyId}")
+                    else:
+                        keyHandler.insertKeyLog(apiKeyId, True, None)
+                        break
+
                 print("Resumed listening...\n")
                 stop_listening = recognizer.listen_in_background(mic, record_callback, phrase_time_limit=record_timeout)
-
             else:
                 transcription[-1] = text
 
-            os.system('cls' if os.name == 'nt' else 'clear')
+            # os.system('cls' if os.name == 'nt' else 'clear')
             for line in transcription:
                 print(line)
         else:
             await asyncio.sleep(0.25)
-
-async def main():
-    args = setup_args()
-    model_name = args.model + ("" if args.non_english else ".en")
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    print("Using device:", device)
-
-    recognizer, mic = setup_microphone(args)
-    audio_model = whisper.load_model(model_name).to(device)
-
-    # Run transcription loop
-    await transcribe_loop(audio_model, recognizer, mic, args.phrase_timeout, args.record_timeout)
-
-if __name__ == "__main__":
-    asyncio.run(main())

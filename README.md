@@ -1,6 +1,7 @@
-## Process
+## Gemini exceptions
 
-1. Whisper (background listening -> audio to text)
-2. broadcast data (then wait for response)
-3. recieve data (on websocket)
-4. Gemini (send text prompt, stream audio output)
+*   Code: 1007
+    Reason: API key not valid. Please pass a valid API key.
+
+*   Code: 1011
+    Reason: You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: h

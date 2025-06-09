@@ -4,4 +4,6 @@
 /sandbox/
 
 .env
+api-keys.yaml
+api_keys.sqlite
 src/__pycache__/
