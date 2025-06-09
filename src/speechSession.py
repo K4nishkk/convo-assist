@@ -9,6 +9,7 @@ import torch
 import keyHandler
 from dotenv import load_dotenv
 import websockets
+from constants import DB_PATH, YAML_FILE_PATH
 
 load_dotenv()
 
@@ -17,8 +18,8 @@ transcription = ['']
 phrase_time = None
 phrase_bytes = bytes()
 
-keyHandler.openConn("api_keys.sqlite")
-keyHandler.loadKeysData("api-keys.yaml")
+keyHandler.openConn(DB_PATH)
+keyHandler.loadKeysData(YAML_FILE_PATH)
 apiKeyId: str = keyHandler.getKeyId()
 print(f"Using key: {apiKeyId}")
 

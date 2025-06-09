@@ -15,8 +15,8 @@ def initDB():
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS apiKeys (
         id TEXT PRIMARY KEY,
-        project_name TEXT NOT NULL,
-        project_number INTEGER NOT NULL
+        project_name TEXT,
+        project_number INTEGER
     )
     """)
 
@@ -67,10 +67,10 @@ def addSampleLogData():
         ("API_KEY1", datetime(2020, 5, 14), True, None),
         ("API_KEY1", datetime(2020, 5, 15), True, None),
         ("API_KEY1", datetime(2020, 5, 16), True, None),
-        ("API_KEY1", datetime(2020, 5, 17), False, "error"),
+        ("API_KEY1", datetime(2020, 5, 17), False, "1007"),
         ("API_KEY2", datetime(2020, 5, 18), True, None),
         ("API_KEY2", datetime(2020, 5, 19), True, None),
-        ("API_KEY2", datetime(2020, 5, 20), False, "error"),
+        ("API_KEY2", datetime(2020, 5, 20), False, "1007"),
     ])
 
     conn.commit()
