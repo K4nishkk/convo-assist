@@ -57,9 +57,10 @@ async def live(message, api_key):
         audio_duration = total_bytes / (RATE * CHANNELS * 2)
 
     except websockets.exceptions.ConnectionClosedError as e:
-        print(f"Code: {e.code}")
-        print(f"Reason: {e.reason}")
-        raise e
+        # print(f"Code: {e.code}")
+        # print(f"Reason: {e.reason}")
+        # print(type(e))
+        raise(e)
 
     finally:
         stream.stop_stream()
@@ -70,7 +71,7 @@ async def live(message, api_key):
         print(f"total_bytes: {total_bytes}")
         print(f"audio_duration {audio_duration}")
         
-        return lag, total_bytes, audio_duration
+    return lag, total_bytes, audio_duration
 
-if __name__ == "__main__":
-    asyncio.run(live("how are you", os.getenv("API_KEY8")))
+# if __name__ == "__main__":
+#     asyncio.run(live("how are you", os.getenv("API_KEY6")))

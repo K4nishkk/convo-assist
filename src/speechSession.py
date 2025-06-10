@@ -9,7 +9,7 @@ import torch
 import keyHandler
 from dotenv import load_dotenv
 import websockets
-from constants import DB_PATH, YAML_FILE_PATH
+from constants import DB_PATH, YAML_FILE_PATH, ASSISTANT_NAME
 
 load_dotenv()
 
@@ -65,23 +65,29 @@ async def conversation_loop(audio_model, recognizer, mic, phrase_timeout, record
             if phrase_complete:
                 transcription.append(text + " <--- end")
 
-                print("Paused. Waiting for reply...")
-                stop_listening(wait_for_stop=False)
+                prompt = transcription[-2]
+                if prompt.find(ASSISTANT_NAME) >= 0:
+                    prompt = prompt.replace(ASSISTANT_NAME, "", 1)
 
-                while True:
-                    try:
-                        await live(transcription[-2], os.getenv(apiKeyId))
-                    except websockets.exceptions.ConnectionClosedError as e:
-                        print("An error has occured, changing key")
-                        keyHandler.insertKeyLog(apiKeyId, False, e.code)
-                        apiKeyId = keyHandler.getNextKeyId(apiKeyId)
-                        print(f"new keyId: {apiKeyId}")
-                    else:
-                        keyHandler.insertKeyLog(apiKeyId, True, None)
-                        break
+                    print("Paused. Waiting for reply...")
+                    stop_listening(wait_for_stop=False)
 
-                print("Resumed listening...\n")
-                stop_listening = recognizer.listen_in_background(mic, record_callback, phrase_time_limit=record_timeout)
+                    while True:
+                        try:
+                            await live(prompt, os.getenv(apiKeyId))
+
+                        except websockets.exceptions.ConnectionClosedError as e:
+                            print("An error has occured, changing key")
+                            keyHandler.insertKeyLog(apiKeyId, False, e.code)
+                            apiKeyId = keyHandler.getNextKeyId(apiKeyId)
+                            print(f"new keyId: {apiKeyId}")
+                            
+                        else:
+                            keyHandler.insertKeyLog(apiKeyId, True, None)
+                            break
+
+                    print("Resumed listening...\n")
+                    stop_listening = recognizer.listen_in_background(mic, record_callback, phrase_time_limit=record_timeout)
             else:
                 transcription[-1] = text
 
