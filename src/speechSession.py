@@ -4,7 +4,7 @@ import asyncio
 from queue import Queue
 from datetime import datetime, timedelta
 import speech_recognition as sr
-from geminiClient import live
+from geminiClient import GeminiSession
 import torch
 import keyHandler
 from dotenv import load_dotenv
@@ -21,7 +21,7 @@ phrase_bytes = bytes()
 keyHandler.openConn(DB_PATH)
 keyHandler.loadKeysData(YAML_FILE_PATH)
 # apiKeyId: str = keyHandler.getKeyId()
-apiKeyId = "API_KEY0"
+apiKeyId = "API_KEY1"
 print(f"Using key: {apiKeyId}")
 
 def setup_microphone(energy_threshold):
@@ -39,10 +39,14 @@ def record_callback(_, audio: sr.AudioData):
 
 async def conversation_loop(audio_model, recognizer, mic, phrase_timeout, record_timeout):
     global phrase_time, phrase_bytes, transcription, apiKeyId
-    
+
     lag = None
     total_bytes = None
     audio_duration = None
+
+    streamer = GeminiSession(apiKeyId)
+    await streamer.start()
+    print("Gemini websocket opened")
 
     stop_listening = recognizer.listen_in_background(mic, record_callback, phrase_time_limit=record_timeout)
     print("Model loaded. Listening...\n")
@@ -81,7 +85,7 @@ async def conversation_loop(audio_model, recognizer, mic, phrase_timeout, record
 
                     while True:
                         try:
-                            lag, total_bytes, audio_duration = await live(prompt, os.getenv(apiKeyId))
+                            await streamer.send_prompt(prompt)
 
                         except websockets.exceptions.ConnectionClosedError as e:
                             print("An error has occured, changing key")
@@ -90,7 +94,7 @@ async def conversation_loop(audio_model, recognizer, mic, phrase_timeout, record
                             print(f"new keyId: {apiKeyId}")
                             
                         else:
-                            keyHandler.insertKeyLog(apiKeyId, True, None, lag, total_bytes, audio_duration)
+                            # keyHandler.insertKeyLog(apiKeyId, True, None)
                             break
 
                     print("Resumed listening...\n")
