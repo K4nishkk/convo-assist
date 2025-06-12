@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 import speech_recognition as sr
 from geminiClient import GeminiSession
 import torch
-import keyHandler
+import keyManager
 from dotenv import load_dotenv
 import websockets
 from constants import DB_PATH, YAML_FILE_PATH, ASSISTANT_NAME
@@ -18,8 +18,8 @@ transcription = ['']
 phrase_time = None
 phrase_bytes = bytes()
 
-keyHandler.openConn(DB_PATH)
-keyHandler.loadKeysData(YAML_FILE_PATH)
+keyManager.openConn(DB_PATH)
+keyManager.loadKeysData(YAML_FILE_PATH)
 # apiKeyId: str = keyHandler.getKeyId()
 apiKeyId = "API_KEY1"
 print(f"Using key: {apiKeyId}")
@@ -89,8 +89,8 @@ async def conversation_loop(audio_model, recognizer, mic, phrase_timeout, record
 
                         except websockets.exceptions.ConnectionClosedError as e:
                             print("An error has occured, changing key")
-                            keyHandler.insertKeyLog(apiKeyId, False, e.code)
-                            apiKeyId = keyHandler.getNextKeyId(apiKeyId)
+                            keyManager.insertKeyLog(apiKeyId, False, e.code)
+                            apiKeyId = keyManager.getNextKeyId(apiKeyId)
                             print(f"new keyId: {apiKeyId}")
                             
                         else:

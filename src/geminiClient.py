@@ -68,6 +68,11 @@ class GeminiSession:
             if response.data:
                 self.stream.write(response.data)
 
+    async def go_away(self):
+        async for res in self.session.receive():
+            if res.go_away:
+                print("Server requested disconnect")
+
 async def main():
     streamer = GeminiSession("API_KEY6")
     await streamer.start()
