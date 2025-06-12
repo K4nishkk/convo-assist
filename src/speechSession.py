@@ -20,7 +20,8 @@ phrase_bytes = bytes()
 
 keyHandler.openConn(DB_PATH)
 keyHandler.loadKeysData(YAML_FILE_PATH)
-apiKeyId: str = keyHandler.getKeyId()
+# apiKeyId: str = keyHandler.getKeyId()
+apiKeyId = "API_KEY0"
 print(f"Using key: {apiKeyId}")
 
 def setup_microphone(energy_threshold):
@@ -38,6 +39,10 @@ def record_callback(_, audio: sr.AudioData):
 
 async def conversation_loop(audio_model, recognizer, mic, phrase_timeout, record_timeout):
     global phrase_time, phrase_bytes, transcription, apiKeyId
+    
+    lag = None
+    total_bytes = None
+    audio_duration = None
 
     stop_listening = recognizer.listen_in_background(mic, record_callback, phrase_time_limit=record_timeout)
     print("Model loaded. Listening...\n")
@@ -63,10 +68,12 @@ async def conversation_loop(audio_model, recognizer, mic, phrase_timeout, record
                 text = result['text'].strip()
 
             if phrase_complete:
-                transcription.append(text + " <--- end")
+                transcription.append(text + " <--- end") # add latest transcription
 
                 prompt = transcription[-2]
+                print(f"'Prompt: {prompt}'")
                 if prompt.find(ASSISTANT_NAME) >= 0:
+                    print("ASSISTANT called")
                     prompt = prompt.replace(ASSISTANT_NAME, "", 1)
 
                     print("Paused. Waiting for reply...")
@@ -74,7 +81,7 @@ async def conversation_loop(audio_model, recognizer, mic, phrase_timeout, record
 
                     while True:
                         try:
-                            await live(prompt, os.getenv(apiKeyId))
+                            lag, total_bytes, audio_duration = await live(prompt, os.getenv(apiKeyId))
 
                         except websockets.exceptions.ConnectionClosedError as e:
                             print("An error has occured, changing key")
@@ -83,13 +90,13 @@ async def conversation_loop(audio_model, recognizer, mic, phrase_timeout, record
                             print(f"new keyId: {apiKeyId}")
                             
                         else:
-                            keyHandler.insertKeyLog(apiKeyId, True, None)
+                            keyHandler.insertKeyLog(apiKeyId, True, None, lag, total_bytes, audio_duration)
                             break
 
                     print("Resumed listening...\n")
                     stop_listening = recognizer.listen_in_background(mic, record_callback, phrase_time_limit=record_timeout)
             else:
-                transcription[-1] = text
+                transcription[-1] = text # update the last transcription
 
             # os.system('cls' if os.name == 'nt' else 'clear')
             for line in transcription:

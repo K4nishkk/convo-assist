@@ -84,7 +84,7 @@ def getKeyId():
         LIMIT 1
     """)
 
-    key_id, success = cursor.fetchone()
+    (key_id, success) = cursor.fetchone()
     if (success):
         return key_id
     else:
@@ -98,10 +98,10 @@ def getKeyCount():
     cursor.execute("SELECT COUNT(*) FROM apiKeys")
     return cursor.fetchone()[0]
 
-def insertKeyLog(key_id, success, error):
+def insertKeyLog(key_id, success, error, lag=None, total_bytes=None, audio_duration=None):
     cursor.execute("""
-        INSERT INTO keyLogs (key_id, success, error)
+        INSERT INTO keyLogs (key_id, success, error, lag, total_bytes, audio_duration)
         VALUES (?, ?, ?)
-    """, (key_id, success, error))
+    """, (key_id, success, error, lag, total_bytes, audio_duration))
     conn.commit()
     print("key log inserted")
