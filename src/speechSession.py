@@ -1,15 +1,19 @@
-import os
 import numpy as np
 import asyncio
 from queue import Queue
 from datetime import datetime, timedelta
 import speech_recognition as sr
-from geminiClient import GeminiSession
 import torch
-import keyManager
 from dotenv import load_dotenv
 import websockets
-from constants import DB_PATH, YAML_FILE_PATH, ASSISTANT_NAME
+from constants import *
+import logging
+import geminiClient, keyManager
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(filename)s:%(lineno)d - %(message)s"
+)
 
 load_dotenv()
 
@@ -17,12 +21,6 @@ data_queue = Queue()
 transcription = ['']
 phrase_time = None
 phrase_bytes = bytes()
-
-keyManager.openConn(DB_PATH)
-keyManager.loadKeysData(YAML_FILE_PATH)
-# apiKeyId: str = keyHandler.getKeyId()
-apiKeyId = "API_KEY1"
-print(f"Using key: {apiKeyId}")
 
 def setup_microphone(energy_threshold):
     recognizer = sr.Recognizer()
@@ -37,19 +35,19 @@ def record_callback(_, audio: sr.AudioData):
     data = audio.get_raw_data()
     data_queue.put(data)
 
-async def conversation_loop(audio_model, recognizer, mic, phrase_timeout, record_timeout):
-    global phrase_time, phrase_bytes, transcription, apiKeyId
-
-    lag = None
-    total_bytes = None
-    audio_duration = None
-
-    streamer = GeminiSession(apiKeyId)
-    await streamer.start()
-    print("Gemini websocket opened")
-
+async def conversation_loop(
+    audio_model,
+    recognizer,
+    mic,
+    phrase_timeout,
+    record_timeout,
+    db: keyManager.KeyManager,
+    streamer: geminiClient.GeminiSession,
+    key_id: str
+):
+    global phrase_time, phrase_bytes, transcription
     stop_listening = recognizer.listen_in_background(mic, record_callback, phrase_time_limit=record_timeout)
-    print("Model loaded. Listening...\n")
+    logging.info("Model loaded. Listening...\n")
 
     while True:
         now = datetime.utcnow()
@@ -72,30 +70,26 @@ async def conversation_loop(audio_model, recognizer, mic, phrase_timeout, record
                 text = result['text'].strip()
 
             if phrase_complete:
-                transcription.append(text + " <--- end") # add latest transcription
+                transcription.append(text) # add latest transcription
 
                 prompt = transcription[-2]
-                print(f"'Prompt: {prompt}'")
                 if prompt.find(ASSISTANT_NAME) >= 0:
-                    print("ASSISTANT called")
                     prompt = prompt.replace(ASSISTANT_NAME, "", 1)
 
-                    print("Paused. Waiting for reply...")
+                    logging.info("Paused. Waiting for reply...")
                     stop_listening(wait_for_stop=False)
 
                     while True:
                         try:
-                            await streamer.send_prompt(prompt)
+                            total_bytes = await streamer.send_prompt(prompt)
+                            asyncio.create_task(db.insertKeyLog(key_id=key_id, total_bytes=total_bytes))
+                            break
 
                         except websockets.exceptions.ConnectionClosedError as e:
-                            print("An error has occured, changing key")
-                            keyManager.insertKeyLog(apiKeyId, False, e.code)
-                            apiKeyId = keyManager.getNextKeyId(apiKeyId)
-                            print(f"new keyId: {apiKeyId}")
-                            
-                        else:
-                            # keyHandler.insertKeyLog(apiKeyId, True, None)
-                            break
+                            logging.error("An error has occured")
+                            asyncio.create_task(db.insertKeyLog(key_id=key_id, success=False, error=e.code))
+                            print(e)
+                            raise e
 
                     print("Resumed listening...\n")
                     stop_listening = recognizer.listen_in_background(mic, record_callback, phrase_time_limit=record_timeout)

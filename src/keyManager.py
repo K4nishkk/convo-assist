@@ -1,9 +1,7 @@
 import yaml
-from datetime import datetime
 import aiosqlite
 import asyncio
 import logging
-from collections import deque
 
 logging.basicConfig(
     level=logging.INFO,
@@ -14,6 +12,7 @@ class KeyManager:
     def __init__(self, db_path, yaml_file_path) -> None:
         self.db_path = db_path
         self.yaml_file_path = yaml_file_path
+        self.lock = asyncio.Lock()  # ensure writes are serialized
 
     async def _openConn(self):
         self.db = await aiosqlite.connect(self.db_path)
@@ -86,25 +85,27 @@ class KeyManager:
         self.keysList = [row[0] for row in rows]
         self.iterator = None
 
-    async def init(self):
+    async def preset(self):
         await self._openConn()
         await self._initDB()
         await self._updateApiKeysInDB()
         await self._createKeysList()
         await self._closeConn()
+        logging.info("Api-keys DB initialized")
 
     async def insertKeyLog(self, key_id, success=True, error=None, lag=None, total_bytes=None, audio_duration=None):
-        await self._openConn()
-        await self.db.execute(
-            """
-            INSERT INTO keyLogs (key_id, success, error, lag, total_bytes, audio_duration)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (key_id, success, error, lag, total_bytes, audio_duration)
-        )
+        async with self.lock:
+            await self._openConn()
+            await self.db.execute(
+                """
+                INSERT INTO keyLogs (key_id, success, error, lag, total_bytes, audio_duration)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (key_id, success, error, lag, total_bytes, audio_duration)
+            )
 
-        await self.db.commit()
-        await self._closeConn()
+            await self.db.commit()
+            await self._closeConn()
         logging.info(f"Key log inserted: KEY_ID={key_id} SUCCESS={success}")
 
     def getKeyId(self):
@@ -118,17 +119,19 @@ class KeyManager:
 
 async def main():
     db = KeyManager("api_keys.sqlite", "api-keys.yaml")
-    await db.init()
+    await db.preset()
     print(f"keyCount: {db.keyCount}")
     print(f"keysList: {db.keysList}")
     print(db.getKeyId())
     print(db.getKeyId())
-    await db.insertKeyLog(key_id="API_KEY0", success=True, lag=1.55, total_bytes=10000, audio_duration=4.55)
-    await db.insertKeyLog(key_id="API_KEY0", success=True, lag=2.55, total_bytes=20000, audio_duration=5.55)
-    await db.insertKeyLog(key_id="API_KEY0", success=True, lag=3.55, total_bytes=30000, audio_duration=6.55)
-    await db.insertKeyLog(key_id="API_KEY0", success=False, error=1007)
-    await db.insertKeyLog(key_id="API_KEY1", success=True, lag=1.55, total_bytes=10000, audio_duration=4.55)
-    await db.insertKeyLog(key_id="API_KEY1", success=True, lag=2.55, total_bytes=20000, audio_duration=5.55)
+    asyncio.create_task(db.insertKeyLog(key_id="API_KEY0", success=True, lag=1.55, total_bytes=10000, audio_duration=4.55))
+    asyncio.create_task(db.insertKeyLog(key_id="API_KEY0", success=True, lag=2.55, total_bytes=20000, audio_duration=5.55))
+    asyncio.create_task(db.insertKeyLog(key_id="API_KEY0", success=True, lag=3.55, total_bytes=30000, audio_duration=6.55))
+    asyncio.create_task(db.insertKeyLog(key_id="API_KEY0", success=False, error=1007))
+    asyncio.create_task(db.insertKeyLog(key_id="API_KEY1", success=True, lag=1.55, total_bytes=10000, audio_duration=4.55))
+    asyncio.create_task(db.insertKeyLog(key_id="API_KEY1", success=True, lag=2.55, total_bytes=20000, audio_duration=5.55))
+
+    await asyncio.sleep(999999)
 
 if __name__ == "__main__":
     asyncio.run(main())
