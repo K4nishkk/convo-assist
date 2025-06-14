@@ -58,46 +58,40 @@ async def conversation_loop(
             phrase_time = None
             phrase_complete = True
 
-        if not data_queue.empty() or phrase_complete:
+        if not data_queue.empty():
             text = ""
-            if not phrase_complete:
-                phrase_time = now
-                audio_data = b''.join(data_queue.queue)
-                data_queue.queue.clear()
-                phrase_bytes += audio_data
-                audio_np = np.frombuffer(phrase_bytes, dtype=np.int16).astype(np.float32) / 32768.0
-                result = audio_model.transcribe(audio_np, fp16=torch.cuda.is_available())
-                text = result['text'].strip()
+            phrase_time = now
+            audio_data = b''.join(data_queue.queue)
+            data_queue.queue.clear()
+            phrase_bytes += audio_data
+            audio_np = np.frombuffer(phrase_bytes, dtype=np.int16).astype(np.float32) / 32768.0
+            result = audio_model.transcribe(audio_np, fp16=torch.cuda.is_available())
+            text = result['text'].strip()
+            transcription[-1] = text
 
-            if phrase_complete:
-                transcription.append(text) # add latest transcription
+        if phrase_complete:
+            transcription.append("") # append blank text
 
-                prompt = transcription[-2]
-                if prompt.find(ASSISTANT_NAME) >= 0:
-                    prompt = prompt.replace(ASSISTANT_NAME, "", 1)
+            prompt = transcription[-2]
+            if prompt.find(ASSISTANT_NAME) >= 0:
+                prompt = prompt.replace(ASSISTANT_NAME, "", 1)
 
-                    logging.info("Paused. Waiting for reply...")
-                    stop_listening(wait_for_stop=False)
+                logging.info("Paused. Waiting for reply...")
+                stop_listening(wait_for_stop=False)
 
-                    while True:
-                        try:
-                            total_bytes = await streamer.send_prompt(prompt)
-                            asyncio.create_task(db.insertKeyLog(key_id=key_id, total_bytes=total_bytes))
-                            break
+                try:
+                    total_bytes = await streamer.send_prompt(prompt)
+                    # TODO wrong key getting inserted after restarting connection
+                    asyncio.create_task(db.insertKeyLog(key_id=key_id, total_bytes=total_bytes))
 
-                        except websockets.exceptions.ConnectionClosedError as e:
-                            logging.error("An error has occured")
-                            asyncio.create_task(db.insertKeyLog(key_id=key_id, success=False, error=e.code))
-                            print(e)
-                            raise e
+                except websockets.exceptions.ConnectionClosedError as e:
+                    logging.error(e)
+                    asyncio.create_task(db.insertKeyLog(key_id=key_id, success=False, error=e.code))
+                    raise e
 
-                    print("Resumed listening...\n")
-                    stop_listening = recognizer.listen_in_background(mic, record_callback, phrase_time_limit=record_timeout)
+                logging.info("Resumed listening...\n")
+                stop_listening = recognizer.listen_in_background(mic, record_callback, phrase_time_limit=record_timeout)
             else:
-                transcription[-1] = text # update the last transcription
-
-            # os.system('cls' if os.name == 'nt' else 'clear')
-            for line in transcription:
-                print(line)
+                logging.info(f"Prompt (not dispatched): {prompt}")
         else:
             await asyncio.sleep(0.25)

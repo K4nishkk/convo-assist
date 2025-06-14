@@ -14,22 +14,17 @@ async def main():
 
     db = KeyManager(DB_PATH, YAML_FILE_PATH)
     await db.preset()
+    
+    streamer = GeminiSession(db)
 
-    streamer = GeminiSession()
-    streamer.openAudioStream()
-    key_id = await streamer.openConn(db)
+    try:
+        streamer.open_audio_stream()
+        key_id = await streamer.connect_to_session()
 
-    await conversation_loop(
-        model,
-        recognizer,
-        mic,
-        args.phrase_timeout,
-        args.record_timeout,
-        db,
-        streamer,
-        key_id
-    )
+        await conversation_loop(model, recognizer, mic, args.phrase_timeout, args.record_timeout, db, streamer, key_id)
+    finally:
+        await streamer.terminate_session()
+        streamer.close_audio_stream()
 
 if __name__ == "__main__":
-
     asyncio.run(main())
