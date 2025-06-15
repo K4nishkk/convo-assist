@@ -9,6 +9,7 @@ import websockets
 from constants import *
 import logging
 import geminiClient, keyManager
+import time
 
 logging.basicConfig(
     level=logging.INFO,
@@ -43,7 +44,7 @@ async def conversation_loop(
     record_timeout,
     db: keyManager.KeyManager,
     streamer: geminiClient.GeminiSession,
-    key_id: str
+    key_id: str # inital key_id, used for setting connection first time
 ):
     global phrase_time, phrase_bytes, transcription
     stop_listening = recognizer.listen_in_background(mic, record_callback, phrase_time_limit=record_timeout)
@@ -80,9 +81,18 @@ async def conversation_loop(
                 stop_listening(wait_for_stop=False)
 
                 try:
-                    total_bytes = await streamer.send_prompt(prompt)
+                    start = time.perf_counter()
+                    total_bytes, key_id = await streamer.send_prompt(prompt)
+                    end = time.perf_counter()
+
+                    audio_duration = total_bytes / (AUDIO_RATE * AUDIO_CHANNELS * 2)
+                    effective_response_time = (end - start) - audio_duration
+
+                    # logging.info(f"audio_duration: {audio_duration}")
+                    # logging.info(f"effective_response_time {effective_response_time}")
+
                     # TODO wrong key getting inserted after restarting connection
-                    asyncio.create_task(db.insertKeyLog(key_id=key_id, total_bytes=total_bytes))
+                    asyncio.create_task(db.insertKeyLog(key_id=key_id, total_bytes=total_bytes, audio_duration=audio_duration, lag=effective_response_time))
 
                 except websockets.exceptions.ConnectionClosedError as e:
                     logging.error(e)
