@@ -1,21 +1,18 @@
 from google import genai
 from google.genai import types
-import pyaudio
-import asyncio
-import keyManager
-import logging
 import time
 import os
-from dotenv import load_dotenv
+import pyaudio
+import asyncio
+import utils.keyManager as keyManager
 import websockets
-from constants import *
+from utils.constants import *
 
+from dotenv import load_dotenv
 load_dotenv()
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(filename)s:%(lineno)d - %(message)s"
-)
+import logging
+logger = logging.getLogger(__name__)
 
 model = "gemini-2.5-flash-preview-native-audio-dialog"
 config = types.LiveConnectConfig(
@@ -86,8 +83,8 @@ class GeminiSession:
             while True:
                 async with self._reconnect_lock:
                     await self._receiver_loop()
-                    logging.info("Restarting receiver loop...")
-                    await self.connect_to_session()
+                    logging.info("Reconnecting to Gemini server...")
+                    await self.connect_to_session(same_key_id=True)
 
         if self._recv_task and not self._recv_task.done():
             logging.warning("Receiver already active, skipping start.")
@@ -95,8 +92,12 @@ class GeminiSession:
 
         self._recv_task = asyncio.create_task(wrapper())
 
-    async def connect_to_session(self):
-        self.key_id = self.db.getKeyId()
+    async def connect_to_session(self, same_key_id = False):
+        if not same_key_id:
+            self.key_id = self.db.getKeyId()
+        else:
+            logging.info(f"Reconnecting with same KEY_ID: {self.key_id}")
+            
         while True:
             try:
                 start = time.perf_counter()
@@ -107,7 +108,7 @@ class GeminiSession:
                 break
             except websockets.exceptions.ConnectionClosedError as e:
                 logging.error(e)
-                asyncio.create_task(self.db.insertKeyLog(self.key_id, False, e.code))
+                self.db.insertKeyLog(self.key_id, False, e.code)
                 self.key_id = self.db.getKeyId()
 
         if not self._recv_running:
