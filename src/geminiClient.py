@@ -2,76 +2,193 @@ from google import genai
 from google.genai import types
 import pyaudio
 import asyncio
-import websockets
-
+import keyManager
+import logging
 import time
 import os
 from dotenv import load_dotenv
+import websockets
+from constants import *
+
 load_dotenv()
 
-# PyAudio configuration
-RATE = 24000
-CHANNELS = 1
-FORMAT = pyaudio.paInt16
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(filename)s:%(lineno)d - %(message)s"
+)
 
 model = "gemini-2.5-flash-preview-native-audio-dialog"
-config = types.LiveConnectConfig(response_modalities=[types.Modality.AUDIO])
-
-async def live(message, api_key):
-    # performance measuring vars
-    begin_time = time.perf_counter()
-    first_audio_time = None
-    total_bytes = 0
-    lag = None
-    audio_duration = None
-
-    client = genai.Client(api_key=api_key)
-
-    p = pyaudio.PyAudio()
-
-    stream = p.open(
-        format=FORMAT,
-        channels=CHANNELS,
-        rate=RATE,
-        output=True,
-        frames_per_buffer=1024,
-        stream_callback=None
+config = types.LiveConnectConfig(
+    response_modalities=[types.Modality.AUDIO],
+    context_window_compression=(
+        types.ContextWindowCompressionConfig(
+            sliding_window=types.SlidingWindow(),
+        )
     )
+)
 
-    try:
-        async with client.aio.live.connect(model=model, config=config) as session:
+class GeminiSession:
+    TERMINATION_SENTINEL = object()
 
-            await session.send_client_content(turns={"role": "user", "parts": [{"text": message}]}, turn_complete=True)
-            print(f"message sent: {message}, awaiting response")
+    def __init__(self, db: keyManager.KeyManager):
+        self.p = pyaudio.PyAudio()
+        self.response_queue = asyncio.Queue()
+        self._recv_task = None
+        self._stop_event = asyncio.Event()
+        self.db = db
+        self._recv_running = False
+        self._reconnect_lock = asyncio.Lock()
 
-            async for response in session.receive():
-                if response.data:
-                    if first_audio_time is None:
-                        first_audio_time = time.perf_counter()
-                        lag = first_audio_time - begin_time
+    def open_audio_stream(self):
+        self.stream = self.p.open(
+            format=pyaudio.paInt16,
+            channels=AUDIO_CHANNELS,
+            rate=AUDIO_RATE,
+            output=True,
+            frames_per_buffer=AUDIO_FRAMES_PER_BUFFER
+        )
+        logging.info("Output Audio stream opened")
 
-                    chunk_size = len(response.data)
-                    total_bytes += chunk_size
-                    stream.write(response.data)
-
-        audio_duration = total_bytes / (RATE * CHANNELS * 2)
-
-    except websockets.exceptions.ConnectionClosedError as e:
-        # print(f"Code: {e.code}")
-        # print(f"Reason: {e.reason}")
-        # print(type(e))
-        raise(e)
-
-    finally:
-        stream.stop_stream()
-        stream.close()
-        p.terminate()
-
-        print(f"Lag: {lag}")
-        print(f"total_bytes: {total_bytes}")
-        print(f"audio_duration {audio_duration}")
+    def close_audio_stream(self):
+        self.stream.stop_stream()
+        self.stream.close()
+        self.p.terminate()
+        logging.info("Output Audio stream closed")
         
-    return lag, total_bytes, audio_duration
+    async def _receiver_loop(self):
+        if self._recv_running:
+            logging.warning("Receiver loop already running, skipping.")
+            return
+        self._recv_running = True
+    
+        logging.info("Listening to incoming stream of responses")
+        try:
+            while True:
+                async for message in self.session.receive():
+                    await self.response_queue.put(message)
+
+                    if message.go_away:
+                        logging.info(f"Server requested disconnect in {message.go_away.time_left}")
+                        await self.terminate_session()
+                        return
+                    
+                # block ends everytime after turn_complete
+        except Exception as e:
+            logging.error(f"Receiver loop error: {e}")
+            await self.response_queue.put(self.TERMINATION_SENTINEL)
+            await self.terminate_session()
+            return
+        finally:
+            self._recv_running = False
+            logging.info("Response stream closed")
+
+    async def _start_receiver(self):
+        async def wrapper():
+            while True:
+                async with self._reconnect_lock:
+                    await self._receiver_loop()
+                    logging.info("Restarting receiver loop...")
+                    await self.connect_to_session()
+
+        if self._recv_task and not self._recv_task.done():
+            logging.warning("Receiver already active, skipping start.")
+            return
+
+        self._recv_task = asyncio.create_task(wrapper())
+
+    async def connect_to_session(self):
+        self.key_id = self.db.getKeyId()
+        while True:
+            try:
+                start = time.perf_counter()
+                self.client = genai.Client(api_key=os.getenv(self.key_id))
+                self.session_context = self.client.aio.live.connect(model=model, config=config)
+                self.session = await self.session_context.__aenter__()
+                end = time.perf_counter()
+                break
+            except websockets.exceptions.ConnectionClosedError as e:
+                logging.error(e)
+                asyncio.create_task(self.db.insertKeyLog(self.key_id, False, e.code))
+                self.key_id = self.db.getKeyId()
+
+        if not self._recv_running:
+            await self._start_receiver()
+
+        logging.info(f"Gemini websocket connection opened in: {(end - start):.2f}s")
+        return self.key_id
+
+    async def terminate_session(self):
+        logging.info("Terminating Gemini session...")
+
+        # Cancel receiver task
+        if self._recv_task:
+            self._recv_task.cancel()
+            try:
+                await self._recv_task
+            except asyncio.CancelledError:
+                logging.info("Receiver task cancelled")
+
+        self._recv_task = None
+        self._recv_running = False
+
+        # Clean up context
+        if self.session_context:
+            try:
+                await self.session_context.__aexit__(None, None, None)
+            except Exception as e:
+                logging.warning(f"Context exit error: {e}")
+            self.session_context = None
+
+        logging.info("Gemini connection terminated")
+
+    async def _clear_response_queue(self):
+        while not self.response_queue.empty():
+            try:
+                self.response_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+
+    async def send_prompt(self, prompt):
+        await self._clear_response_queue()
+        await self.session.send_client_content(
+            turns={"role": "user", "parts": [{"text": prompt}]},
+            turn_complete=True
+        )
+        logging.info(f"Prompt (dispatched): {prompt}")
+
+        total_bytes = 0
+
+        while True:
+            response = await self.response_queue.get()
+
+            # TODO currently slow
+            if response is self.TERMINATION_SENTINEL:
+                logging.warning("Receiver loop failed — terminating prompt handling.")
+                break
+
+            elif response.data:
+                chunk_size = len(response.data)
+                total_bytes += chunk_size
+                self.stream.write(response.data)
+
+            elif response.server_content and response.server_content.turn_complete:
+                break
+
+        return total_bytes, self.key_id
+
+    async def go_away(self):
+        async for res in self.session.receive():
+            if res.go_away:
+                logging.info("Server requested disconnect")
+                logging.info(res.go_away.time_left)
+
+# async def main():
+#     streamer = GeminiSession()
+#     streamer.openAudioStream()
+#     await streamer.openConn("API_KEY0")
+#     await streamer.send_prompt("What is difference between goroutines and coroutines?")
+#     await streamer.closeConn()
+#     streamer.closeAudioStream()
 
 # if __name__ == "__main__":
-#     asyncio.run(live("how are you", os.getenv("API_KEY6")))
+#     asyncio.run(main())
