@@ -175,14 +175,3 @@ class GeminiSession:
                 break
 
         return total_bytes, self.key_id
-
-# async def main():
-#     streamer = GeminiSession()
-#     streamer.openAudioStream()
-#     await streamer.openConn("API_KEY0")
-#     await streamer.send_prompt("What is difference between goroutines and coroutines?")
-#     await streamer.closeConn()
-#     streamer.closeAudioStream()
-
-# if __name__ == "__main__":
-#     asyncio.run(main())

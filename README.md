@@ -5,3 +5,8 @@
 
 *   Code: 1011
     Reason: You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: h
+    Reason: keepalive ping timeout; no close frame received
+
+## Working of GeminiSession:
+
+* 

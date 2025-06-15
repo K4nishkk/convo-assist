@@ -1,6 +1,7 @@
 import yaml
 import aiosqlite
 import asyncio
+from datetime import datetime
 from utils.constants import *
 
 import logging
@@ -32,7 +33,7 @@ class KeyManager:
             CREATE TABLE IF NOT EXISTS keyLogs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 key_id TEXT SECONDARY NOT NULL,
-                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                timestamp DATETIME NOT NULL,
                 success BOOLEAN NOT NULL,
                 error TEXT,
                 lag FLOAT,
@@ -97,6 +98,8 @@ class KeyManager:
             async with self.lock:
                 await self._openConn()
 
+                current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
                 lag, audio_duration = None, None
                 if (total_bytes):
                     audio_duration = total_bytes / (AUDIO_RATE * AUDIO_CHANNELS * 2)
@@ -104,10 +107,10 @@ class KeyManager:
 
                 await self.db.execute(
                     """
-                    INSERT INTO keyLogs (key_id, success, error, lag, total_bytes, audio_duration)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                    INSERT INTO keyLogs (key_id, timestamp, success, error, lag, total_bytes, audio_duration)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (key_id, success, error, lag, total_bytes, audio_duration)
+                    (key_id, current_time, success, error, lag, total_bytes, audio_duration)
                 )
 
                 await self.db.commit()
