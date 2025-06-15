@@ -1,12 +1,10 @@
 import yaml
 import aiosqlite
 import asyncio
-import logging
+from utils.constants import *
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(filename)s:%(lineno)d - %(message)s"
-)
+import logging
+logger = logging.getLogger(__name__)
 
 class KeyManager:
     def __init__(self, db_path, yaml_file_path) -> None:
@@ -29,6 +27,7 @@ class KeyManager:
             )
         """)
 
+        # TODO change to local time
         await self.db.execute("""
             CREATE TABLE IF NOT EXISTS keyLogs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -93,20 +92,29 @@ class KeyManager:
         await self._closeConn()
         logging.info("Api-keys DB initialized")
 
-    async def insertKeyLog(self, key_id, success=True, error=None, lag=None, total_bytes=None, audio_duration=None):
-        async with self.lock:
-            await self._openConn()
-            await self.db.execute(
-                """
-                INSERT INTO keyLogs (key_id, success, error, lag, total_bytes, audio_duration)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (key_id, success, error, lag, total_bytes, audio_duration)
-            )
+    def insertKeyLog(self, key_id, success=True, error=None, total_bytes=None, total_duration=None):
+        async def wrapper():
+            async with self.lock:
+                await self._openConn()
 
-            await self.db.commit()
-            await self._closeConn()
-        logging.info(f"Key log inserted: KEY_ID={key_id} SUCCESS={success}")
+                lag, audio_duration = None, None
+                if (total_bytes):
+                    audio_duration = total_bytes / (AUDIO_RATE * AUDIO_CHANNELS * 2)
+                    lag = round((total_duration) - audio_duration, 2)
+
+                await self.db.execute(
+                    """
+                    INSERT INTO keyLogs (key_id, success, error, lag, total_bytes, audio_duration)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (key_id, success, error, lag, total_bytes, audio_duration)
+                )
+
+                await self.db.commit()
+                await self._closeConn()
+            logging.info(f"Key log inserted: KEY_ID={key_id} SUCCESS={success}")
+        
+        asyncio.create_task(wrapper())
 
     def getKeyId(self):
         if not self.iterator:
@@ -124,12 +132,12 @@ async def main():
     print(f"keysList: {db.keysList}")
     print(db.getKeyId())
     print(db.getKeyId())
-    asyncio.create_task(db.insertKeyLog(key_id="API_KEY0", success=True, lag=1.55, total_bytes=10000, audio_duration=4.55))
-    asyncio.create_task(db.insertKeyLog(key_id="API_KEY0", success=True, lag=2.55, total_bytes=20000, audio_duration=5.55))
-    asyncio.create_task(db.insertKeyLog(key_id="API_KEY0", success=True, lag=3.55, total_bytes=30000, audio_duration=6.55))
-    asyncio.create_task(db.insertKeyLog(key_id="API_KEY0", success=False, error=1007))
-    asyncio.create_task(db.insertKeyLog(key_id="API_KEY1", success=True, lag=1.55, total_bytes=10000, audio_duration=4.55))
-    asyncio.create_task(db.insertKeyLog(key_id="API_KEY1", success=True, lag=2.55, total_bytes=20000, audio_duration=5.55))
+    db.insertKeyLog(key_id="API_KEY0", success=True, total_bytes=20000)
+    db.insertKeyLog(key_id="API_KEY0", success=True, total_bytes=30000)
+    db.insertKeyLog(key_id="API_KEY0", success=False, error=1007)
+    db.insertKeyLog(key_id="API_KEY1", success=True, total_bytes=10000)
+    db.insertKeyLog(key_id="API_KEY1", success=True, total_bytes=20000)
+    db.insertKeyLog(key_id="API_KEY0", success=True, total_bytes=10000)
 
     await asyncio.sleep(999999)
 

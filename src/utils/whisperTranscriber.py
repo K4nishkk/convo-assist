@@ -2,10 +2,8 @@ import whisper
 import torch
 import logging
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(filename)s:%(lineno)d - %(message)s"
-)
+import logging
+logger = logging.getLogger(__name__)
 
 def load_whisper_model(model_name, non_english=False):
     full_name = model_name + ("" if non_english else ".en")

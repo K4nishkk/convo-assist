@@ -4,19 +4,16 @@ from queue import Queue
 from datetime import datetime, timedelta
 import speech_recognition as sr
 import torch
-from dotenv import load_dotenv
 import websockets
-from constants import *
-import logging
-import geminiClient, keyManager
+from utils.constants import ASSISTANT_NAME
+import core.geminiClient as geminiClient, utils.keyManager as keyManager
 import time
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(filename)s:%(lineno)d - %(message)s"
-)
-
+from dotenv import load_dotenv
 load_dotenv()
+
+import logging
+logger = logging.getLogger(__name__)
 
 data_queue = Queue()
 transcription = ['']
@@ -52,12 +49,36 @@ async def conversation_loop(
 
     while True:
         now = datetime.utcnow()
-        phrase_complete = False
 
-        if phrase_time and now - phrase_time > timedelta(seconds=phrase_timeout):
+        if phrase_complete(now, phrase_time, phrase_timeout):
             phrase_bytes = bytes()
             phrase_time = None
-            phrase_complete = True
+
+            prompt = transcription[-1]
+            transcription.append("")
+
+            if prompt.find(ASSISTANT_NAME) >= 0:
+                prompt = prompt.replace(ASSISTANT_NAME, "", 1)
+
+                logging.info("Paused. Waiting for reply...")
+                stop_listening(wait_for_stop=False)
+
+                try:
+                    start = time.perf_counter()
+                    total_bytes, key_id = await streamer.send_prompt(prompt)
+                    end = time.perf_counter()
+
+                    db.insertKeyLog(key_id=key_id, total_bytes=total_bytes, total_duration=(end - start))
+
+                except websockets.exceptions.ConnectionClosedError as e:
+                    logging.error(e)
+                    db.insertKeyLog(key_id=key_id, success=False, error=e.code)
+
+                logging.info("Resumed listening...\n")
+                stop_listening = recognizer.listen_in_background(mic, record_callback, phrase_time_limit=record_timeout)
+
+            elif len(prompt) > 10:
+                logging.info(f"Prompt (not dispatched): {prompt[:10]}...")
 
         if not data_queue.empty():
             text = ""
@@ -70,38 +91,8 @@ async def conversation_loop(
             text = result['text'].strip()
             transcription[-1] = text
 
-        if phrase_complete:
-            transcription.append("") # append blank text
-
-            prompt = transcription[-2]
-            if prompt.find(ASSISTANT_NAME) >= 0:
-                prompt = prompt.replace(ASSISTANT_NAME, "", 1)
-
-                logging.info("Paused. Waiting for reply...")
-                stop_listening(wait_for_stop=False)
-
-                try:
-                    start = time.perf_counter()
-                    total_bytes, key_id = await streamer.send_prompt(prompt)
-                    end = time.perf_counter()
-
-                    audio_duration = total_bytes / (AUDIO_RATE * AUDIO_CHANNELS * 2)
-                    effective_response_time = (end - start) - audio_duration
-
-                    # logging.info(f"audio_duration: {audio_duration}")
-                    # logging.info(f"effective_response_time {effective_response_time}")
-
-                    # TODO wrong key getting inserted after restarting connection
-                    asyncio.create_task(db.insertKeyLog(key_id=key_id, total_bytes=total_bytes, audio_duration=audio_duration, lag=effective_response_time))
-
-                except websockets.exceptions.ConnectionClosedError as e:
-                    logging.error(e)
-                    asyncio.create_task(db.insertKeyLog(key_id=key_id, success=False, error=e.code))
-                    raise e
-
-                logging.info("Resumed listening...\n")
-                stop_listening = recognizer.listen_in_background(mic, record_callback, phrase_time_limit=record_timeout)
-            else:
-                logging.info(f"Prompt (not dispatched): {prompt}")
         else:
             await asyncio.sleep(0.25)
+
+def phrase_complete(now, phrase_time, phrase_timeout):
+    return phrase_time and now - phrase_time > timedelta(seconds=phrase_timeout)

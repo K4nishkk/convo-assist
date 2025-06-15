@@ -1,9 +1,9 @@
 /node_modules/
 /venv/
-/__pycache__/
 /sandbox/
+/logs/
+__pycache__/
 
 .env
 api-keys.yaml
 api_keys.sqlite
-src/__pycache__/
