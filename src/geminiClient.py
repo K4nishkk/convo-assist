@@ -34,7 +34,6 @@ class GeminiSession:
         self.p = pyaudio.PyAudio()
         self.response_queue = asyncio.Queue()
         self._recv_task = None
-        self._stop_event = asyncio.Event()
         self.db = db
         self._recv_running = False
         self._reconnect_lock = asyncio.Lock()
@@ -175,12 +174,6 @@ class GeminiSession:
                 break
 
         return total_bytes, self.key_id
-
-    async def go_away(self):
-        async for res in self.session.receive():
-            if res.go_away:
-                logging.info("Server requested disconnect")
-                logging.info(res.go_away.time_left)
 
 # async def main():
 #     streamer = GeminiSession()
