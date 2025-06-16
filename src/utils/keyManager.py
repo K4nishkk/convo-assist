@@ -93,7 +93,7 @@ class KeyManager:
         await self._closeConn()
         logging.info("Api-keys DB initialized")
 
-    def insertKeyLog(self, key_id, success=True, error=None, total_bytes=None, total_duration=None):
+    def insertKeyLog(self, key_id, success=True, error=None, total_bytes=None, total_duration=None, comments=None):
         async def wrapper():
             async with self.lock:
                 await self._openConn()
@@ -107,10 +107,10 @@ class KeyManager:
 
                 await self.db.execute(
                     """
-                    INSERT INTO keyLogs (key_id, timestamp, success, error, lag, total_bytes, audio_duration)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO keyLogs (key_id, timestamp, success, error, lag, total_bytes, audio_duration, comments)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (key_id, current_time, success, error, lag, total_bytes, audio_duration)
+                    (key_id, current_time, success, error, lag, total_bytes, audio_duration, comments)
                 )
 
                 await self.db.commit()

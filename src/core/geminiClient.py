@@ -32,7 +32,7 @@ class GeminiSession:
         self.response_queue = asyncio.Queue()
         self._recv_task = None
         self.db = db
-        self._recv_running = False
+        self._recv_loop_running = False
         self._reconnect_lock = asyncio.Lock()
 
     def open_audio_stream(self):
@@ -52,10 +52,10 @@ class GeminiSession:
         logging.info("Output Audio stream closed")
         
     async def _receiver_loop(self):
-        if self._recv_running:
+        if self._recv_loop_running:
             logging.warning("Receiver loop already running, skipping.")
             return
-        self._recv_running = True
+        self._recv_loop_running = True
     
         logging.info("Listening to incoming stream of responses")
         try:
@@ -69,13 +69,14 @@ class GeminiSession:
                         return
                     
                 # block ends everytime after turn_complete
-        except Exception as e:
+        except websockets.exceptions.ConnectionClosedError as e:
             logging.error(f"Receiver loop error: {e}")
+            self.db.insertKeyLog(self.key_id, False, e.code, comments=f"During receive: {e.reason}")
             await self.response_queue.put(self.TERMINATION_SENTINEL)
             await self.terminate_session()
             return
         finally:
-            self._recv_running = False
+            self._recv_loop_running = False
             logging.info("Response stream closed")
 
     async def _start_receiver(self):
@@ -108,10 +109,10 @@ class GeminiSession:
                 break
             except websockets.exceptions.ConnectionClosedError as e:
                 logging.error(e)
-                self.db.insertKeyLog(self.key_id, False, e.code)
+                self.db.insertKeyLog(self.key_id, False, e.code, comments=f"During connect: {e.reason}")
                 self.key_id = self.db.getKeyId()
 
-        if not self._recv_running:
+        if not self._recv_loop_running:
             await self._start_receiver()
 
         logging.info(f"Gemini websocket connection opened in: {(end - start):.2f}s")
@@ -129,7 +130,7 @@ class GeminiSession:
                 logging.info("Receiver task cancelled")
 
         self._recv_task = None
-        self._recv_running = False
+        self._recv_loop_running = False
 
         # Clean up context
         if self.session_context:
