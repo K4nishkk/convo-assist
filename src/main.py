@@ -7,6 +7,7 @@ from core.speechSession import setup_microphone, conversation_loop
 from utils.whisperTranscriber import load_whisper_model
 from utils.keyManager import KeyManager
 from core.geminiClient import GeminiSession
+from utils.audioPlayer import AudioPlayer
 from utils.constants import *
 
 import logging
@@ -20,18 +21,22 @@ async def main():
 
     db = KeyManager(DB_PATH, YAML_FILE_PATH)
     await db.preset()
-    streamer = GeminiSession(db)
+
+    audioPlayer = AudioPlayer()
+    audio_stream = audioPlayer.open_audio_stream()
+
+    streamer = GeminiSession(db, audio_stream)
 
     try:
-        streamer.open_audio_stream()
         key_id = await streamer.connect_to_session()
-
         await conversation_loop(model, recognizer, mic, args.phrase_timeout, args.record_timeout, db, streamer, key_id)
+
     except Exception as e:
-        logging.error(e)    
+        logging.error(e)
+
     finally:
         await streamer.terminate_session()
-        streamer.close_audio_stream()
+        audioPlayer.close_audio_stream()
 
 if __name__ == "__main__":
     asyncio.run(main())

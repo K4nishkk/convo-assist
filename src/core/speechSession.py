@@ -3,7 +3,6 @@ import asyncio
 from queue import Queue
 from datetime import datetime, timedelta
 import speech_recognition as sr
-import torch
 import websockets
 from utils.constants import ASSISTANT_NAME
 import core.geminiClient as geminiClient, utils.keyManager as keyManager
@@ -87,8 +86,9 @@ async def conversation_loop(
             data_queue.queue.clear()
             phrase_bytes += audio_data
             audio_np = np.frombuffer(phrase_bytes, dtype=np.int16).astype(np.float32) / 32768.0
-            result = audio_model.transcribe(audio_np, fp16=torch.cuda.is_available())
-            text = result['text'].strip()
+            segments, info = audio_model.transcribe(audio_np)
+            text = "".join([s.text for s in segments])
+            print(text)
             transcription[-1] = text
 
         else:

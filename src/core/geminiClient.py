@@ -6,6 +6,7 @@ import pyaudio
 import asyncio
 import utils.keyManager as keyManager
 import websockets
+from typing import Optional
 from utils.constants import *
 
 from dotenv import load_dotenv
@@ -25,31 +26,15 @@ config = types.LiveConnectConfig(
 )
 
 class GeminiSession:
-    TERMINATION_SENTINEL = object()
+    _TERMINATION_SENTINEL = object()
 
-    def __init__(self, db: keyManager.KeyManager):
-        self.p = pyaudio.PyAudio()
+    def __init__(self, db: keyManager.KeyManager, audio_stream: pyaudio.Stream):
+        self.stream = audio_stream
         self.response_queue = asyncio.Queue()
-        self._recv_task = None
+        self._recv_task: Optional[asyncio.Task] = None
         self.db = db
         self._recv_loop_running = False
         self._reconnect_lock = asyncio.Lock()
-
-    def open_audio_stream(self):
-        self.stream = self.p.open(
-            format=pyaudio.paInt16,
-            channels=AUDIO_CHANNELS,
-            rate=AUDIO_RATE,
-            output=True,
-            frames_per_buffer=AUDIO_FRAMES_PER_BUFFER
-        )
-        logging.info("Output Audio stream opened")
-
-    def close_audio_stream(self):
-        self.stream.stop_stream()
-        self.stream.close()
-        self.p.terminate()
-        logging.info("Output Audio stream closed")
         
     async def _receiver_loop(self):
         if self._recv_loop_running:
@@ -72,7 +57,7 @@ class GeminiSession:
         except websockets.exceptions.ConnectionClosedError as e:
             logging.error(f"Receiver loop error: {e}")
             self.db.insertKeyLog(self.key_id, False, e.code, comments=f"During receive: {e.reason}")
-            await self.response_queue.put(self.TERMINATION_SENTINEL)
+            await self.response_queue.put(self._TERMINATION_SENTINEL)
             await self.terminate_session()
             return
         finally:
@@ -163,7 +148,7 @@ class GeminiSession:
             response = await self.response_queue.get()
 
             # TODO currently slow
-            if response is self.TERMINATION_SENTINEL:
+            if response is self._TERMINATION_SENTINEL:
                 logging.warning("Receiver loop failed — terminating prompt handling.")
                 break
 
